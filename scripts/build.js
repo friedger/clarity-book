@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { build_page, link_page } from '../lib/builder.js';
 import { fileURLToPath } from 'node:url';
-
+import { mdToPdf } from 'md-to-pdf';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -30,8 +30,9 @@ async function build(input_path, output_path, template) {
   console.log('Starting build');
   const summary = await fs.readFile(
     path.resolve(__dirname, '../src/SUMMARY.md'),
-    'utf8'
+    'utf8',
   );
+  let content = '';
 
   for (const { entry, name } of await readdir_sorted(input_path)) {
     console.log(entry);
@@ -40,33 +41,40 @@ async function build(input_path, output_path, template) {
         output_path,
         entry.substr(
           input_path.length,
-          entry.length - input_path.length - name.length
-        )
+          entry.length - input_path.length - name.length,
+        ),
       ),
-      { recursive: true }
+      { recursive: true },
     );
     const output_file_path = path.join(
       output_path,
-      entry.substr(input_path.length)
+      entry.substr(input_path.length),
     );
 
-    entry.substr(-3) === '.md'
-      ? fs.writeFile(
-          output_file_path.slice(0, -3) + '.html',
-          await build_page(entry, { template, summary }),
-          'utf8'
-        )
-      : fs.copyFile(entry, output_file_path);
+    if (entry.substr(-3) === '.md') {
+      const pageContent = await build_page(entry, { template, summary });
+      content += await fs.readFile(entry, 'utf8');
+      content += '<div class="page-break"></div>';
+
+      fs.writeFile(
+        output_file_path.slice(0, -3) + '.html',
+        pageContent,
+        'utf8',
+      );
+    } else {
+      fs.copyFile(entry, output_file_path);
+    }
+
     if (name === 'title-page.md')
       fs.writeFile(
         path.join(output_path, 'index.html'),
         await build_page(entry, { template, summary }),
-        'utf8'
+        'utf8',
       );
   }
   console.log('Linking chapters');
   const chapter_files = (await readdir_sorted(output_path)).filter((d) =>
-    d.name.match(/^ch[0-9]+-[0-9]+-[\S]+\.html$/)
+    d.name.match(/^ch[0-9]+-[0-9]+-[\S]+\.html$/),
   );
   chapter_files.forEach(async ({ entry }, index) => {
     const [prev, next] = [chapter_files[index - 1], chapter_files[index + 1]];
@@ -74,19 +82,24 @@ async function build(input_path, output_path, template) {
       fs.writeFile(
         entry,
         await link_page(entry, prev && prev.name, next && next.name),
-        'utf8'
+        'utf8',
       );
   });
+  try {
+    await mdToPdf({ content }, { dest: 'book.pdf' });
+  } catch (e) {
+    console.log(e);
+  }
 }
 
 fs.readFile(path.resolve(__dirname, '../templates/base.html'), 'utf8').then(
-  (template) => build(input_path, output_path, template)
+  (template) => build(input_path, output_path, template),
 );
 
 fs.copyFile(
   path.resolve(
     __dirname,
-    '../node_modules/@hirosystems/clarinet-sdk-wasm-browser/clarinet_sdk_bg.wasm'
+    '../node_modules/@hirosystems/clarinet-sdk-wasm-browser/clarinet_sdk_bg.wasm',
   ),
-  path.resolve(__dirname, '../build/clarinet_sdk_bg.wasm')
+  path.resolve(__dirname, '../build/clarinet_sdk_bg.wasm'),
 );
